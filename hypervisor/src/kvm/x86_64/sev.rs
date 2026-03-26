@@ -11,7 +11,7 @@ use std::path::Path;
 use igvm_defs::SnpPolicy;
 use kvm_bindings::kvm_sev_cmd;
 use kvm_ioctls::VmFd;
-use log::debug;
+use log::{info, debug, error};
 use vmm_sys_util::errno;
 
 pub(crate) type Result<T> = std::result::Result<T, errno::Error>;
@@ -32,6 +32,17 @@ pub const SNP_PAGE_TYPE_CPUID: u32 = 6;
 // The last 12 bits are metadata about the guest context
 // https://docs.amd.com/v/u/en-US/56860_PUB_1.58_SEV_SNP
 pub const GPA_METADATA_PADDING: u32 = 12;
+
+fn sev_ioctl(vm: &VmFd, sev_cmd: &mut kvm_sev_cmd, name: &str) -> Result<()> {
+    let ret = vm.encrypt_op_sev(sev_cmd);
+    if ret.is_err() {
+        error!(
+            "{name} failed: error code 0x{:x}",
+            sev_cmd.error
+        );
+    }
+    ret
+}
 
 #[derive(Debug)]
 pub struct SevFd {
@@ -114,7 +125,7 @@ impl SevFd {
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };
-        vm.encrypt_op_sev(&mut sev_cmd)
+        sev_ioctl(vm, &mut sev_cmd, "KVM_SEV_INIT2")
     }
 
     pub(crate) fn launch_start(&self, vm: &VmFd, guest_policy: SnpPolicy) -> Result<()> {
@@ -131,7 +142,7 @@ impl SevFd {
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };
-        vm.encrypt_op_sev(&mut sev_cmd)
+        sev_ioctl(vm, &mut sev_cmd, "KVM_SEV_SNP_LAUNCH_START")
     }
 
     pub(crate) fn launch_update(
@@ -157,7 +168,7 @@ impl SevFd {
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };
-        vm.encrypt_op_sev(&mut sev_cmd)
+        sev_ioctl(vm, &mut sev_cmd, "KVM_SEV_SNP_LAUNCH_UPDATE")
     }
     pub(crate) fn launch_finish(
         &self,
@@ -180,6 +191,6 @@ impl SevFd {
         };
         let flags = finish.flags;
         debug!("Calling KVM_SEV_SNP_LAUNCH_FINISH, flags: {}", flags);
-        vm.encrypt_op_sev(&mut sev_cmd)
+        sev_ioctl(vm, &mut sev_cmd, "KVM_SEV_SNP_LAUNCH_FINISH")
     }
 }
