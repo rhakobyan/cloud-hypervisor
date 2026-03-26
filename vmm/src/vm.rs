@@ -1035,6 +1035,9 @@ impl Vm {
             )
             .map_err(Error::DeviceManager)?;
 
+        #[cfg(feature = "fw_cfg")]
+        Self::create_fw_cfg_if_enabled(config, device_manager)?;
+
         Ok(load_payload_handle)
     }
 
