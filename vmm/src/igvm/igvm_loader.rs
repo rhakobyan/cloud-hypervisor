@@ -477,10 +477,12 @@ pub fn load_igvm(
                 #[cfg(feature = "kvm")]
                 if hypervisor_type == HypervisorType::Kvm {
                     let vcpus = cpu_manager.lock().unwrap().vcpus();
+                    let entries = cpu_manager.lock().unwrap().common_cpuid();
                     for vcpu in vcpus {
                         let vcpu_locked = vcpu.lock().unwrap();
                         let vcpu_id: u16 = vcpu_locked.id().parse().unwrap();
                         if vcpu_id == *vp_index {
+                            vcpu_locked.set_cpuid2(&entries).map_err(Error::SetVmsa)?;
                             vcpu_locked
                                 .setup_sev_snp_regs(loaded_info.vmsa)
                                 .map_err(Error::SetVmsa)?;

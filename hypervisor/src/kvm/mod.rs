@@ -164,21 +164,18 @@ pub const STAGE0_SIZE: usize = 0x20_0000;
 const VIRTUAL_ADDRESS_SIZE_IN_BITS: usize = 1 << 48;
 #[cfg(feature = "sev_snp")]
 bitfield::bitfield! {
-    /// Guest segment register access right.
-    ///
-    /// See Intel Architecture Software Developer's Manual, Vol.3, Table 24-2.
-    #[derive(Copy, Clone, Default, PartialEq, Eq, Hash)]
+    /// AMD VMCB attributes
+    /// linux/arch/x86/include/asm/svm.h
     pub struct SegAccess(u32);
     impl Debug;
     pub seg_type, _ : 3, 0;
     pub s_code_data, _ : 4;
     pub priv_level, _ : 6, 5;
     pub present, _ : 7;
-    pub available, _ : 12;
-    pub l_64bit, _ : 13;
-    pub db_size_32, _: 14;
-    pub granularity, _: 15;
-    pub unusable, _: 16;
+    pub available, _ : 8;
+    pub l_64bit, _ : 9;
+    pub db_size_32, _: 10;
+    pub granularity, _: 11;
 }
 
 #[cfg(feature = "sev_snp")]
@@ -196,7 +193,7 @@ fn make_segment(sev_selector: igvm::snp_defs::SevSelector) -> Segment {
         db: flags.db_size_32() as u8,
         g: flags.granularity() as u8,
         l: flags.l_64bit() as u8,
-        unusable: flags.unusable() as u8,
+        unusable: 0,
         ..Default::default()
     }
 }
@@ -3260,6 +3257,7 @@ impl cpu::Vcpu for KvmVcpu {
 
         sregs.cr0 = vmsa.cr0;
         sregs.cr4 = vmsa.cr4;
+        sregs.cr3 = vmsa.cr3;
         sregs.efer = vmsa.efer;
 
         sregs.idt.base = vmsa.idtr.base;
@@ -3280,6 +3278,22 @@ impl cpu::Vcpu for KvmVcpu {
         debug!("rdx: {}", vmsa.rdx);
         regs.rdx = vmsa.rdx;
         regs.rflags = vmsa.rflags;
+
+        regs.rsp = vmsa.rsp;
+        regs.rax = vmsa.rax;
+        regs.rbx = vmsa.rbx;
+        regs.rcx = vmsa.rcx;
+        regs.rbp = vmsa.rbp;
+        regs.rsi = vmsa.rsi;
+        regs.rdi = vmsa.rdi;
+        regs.r8 = vmsa.r8;
+        regs.r9 = vmsa.r9;
+        regs.r10 = vmsa.r10;
+        regs.r11 = vmsa.r11;
+        regs.r12 = vmsa.r12;
+        regs.r13 = vmsa.r13;
+        regs.r14 = vmsa.r14;
+        regs.r15 = vmsa.r15;
 
         self.fd
             .set_regs(&regs)

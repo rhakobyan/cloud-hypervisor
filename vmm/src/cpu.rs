@@ -216,6 +216,10 @@ pub enum Error {
     #[error("Failed to set up SEV-SNP vCPU registers")]
     SetupSevSnpRegs(#[source] hypervisor::HypervisorCpuError),
 
+    #[cfg(feature = "sev_snp")]
+    #[error("Failed to set CPUID for SEV-SNP")]
+    SetCpuid(#[source] hypervisor::HypervisorCpuError),
+
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to inject NMI")]
     NmiError(#[source] hypervisor::HypervisorCpuError),
@@ -622,6 +626,13 @@ impl Vcpu {
     /// anything useful.
     pub fn run(&mut self) -> std::result::Result<VmExit, HypervisorCpuError> {
         self.vcpu.run()
+    }
+
+     #[cfg(feature = "sev_snp")]
+    pub fn set_cpuid2(&self, cpuid: &[CpuIdEntry]) -> Result<()> {
+        self.vcpu
+            .set_cpuid2(cpuid)
+            .map_err(Error::SetCpuid)
     }
 
     #[cfg(feature = "sev_snp")]
