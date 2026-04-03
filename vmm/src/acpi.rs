@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+#[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use acpi_tables::Aml;
@@ -15,8 +17,12 @@ use arch::NumaNodes;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::DeviceInfoForFdt;
 use bitflags::bitflags;
+#[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+use devices::legacy::fw_cfg::create_acpi_blobs;
 use log::{info, warn};
 use pci::PciBdf;
+#[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+use sha2::{Digest, Sha256};
 use tracer::trace_scoped;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
@@ -1029,13 +1035,21 @@ fn create_acpi_tables_internal(
 }
 
 #[cfg(feature = "fw_cfg")]
-pub fn create_acpi_tables_for_fw_cfg(
+struct FwCfgAcpiData {
+    rsdp: Rsdp,
+    table_bytes: Vec<u8>,
+    checksums: Vec<(usize, usize)>,
+    pointer_offsets: Vec<usize>,
+}
+
+#[cfg(feature = "fw_cfg")]
+fn build_acpi_tables_for_fw_cfg(
     device_manager: &DeviceManager,
     cpu_manager: &CpuManager,
     memory_manager: &MemoryManager,
     numa_nodes: &NumaNodes,
     tpm_enabled: bool,
-) -> Result<(), crate::vm::Error> {
+) -> FwCfgAcpiData {
     let dsdt_offset = GuestAddress(0);
     let (rsdp, table_bytes, xsdt_table_pointers) = create_acpi_tables_internal(
         dsdt_offset,
@@ -1076,6 +1090,35 @@ pub fn create_acpi_tables_for_fw_cfg(
     ));
     checksums.push(xsdt_checksum);
 
+    FwCfgAcpiData {
+        rsdp,
+        table_bytes,
+        checksums,
+        pointer_offsets,
+    }
+}
+
+#[cfg(feature = "fw_cfg")]
+pub fn create_acpi_tables_for_fw_cfg(
+    device_manager: &DeviceManager,
+    cpu_manager: &CpuManager,
+    memory_manager: &MemoryManager,
+    numa_nodes: &NumaNodes,
+    tpm_enabled: bool,
+) -> Result<(), crate::vm::Error> {
+    let FwCfgAcpiData {
+        rsdp,
+        table_bytes,
+        checksums,
+        pointer_offsets,
+    } = build_acpi_tables_for_fw_cfg(
+        device_manager,
+        cpu_manager,
+        memory_manager,
+        numa_nodes,
+        tpm_enabled,
+    );
+
     device_manager
         .fw_cfg()
         .expect("fw_cfg must be present")
@@ -1083,6 +1126,41 @@ pub fn create_acpi_tables_for_fw_cfg(
         .unwrap()
         .add_acpi(rsdp, table_bytes, checksums, pointer_offsets)
         .map_err(crate::vm::Error::CreatingAcpiTables)
+}
+
+#[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+pub fn create_acpi_tables_fw_cfg_digest(
+    device_manager: &Arc<Mutex<DeviceManager>>,
+    cpu_manager: &Arc<Mutex<CpuManager>>,
+    memory_manager: &Arc<Mutex<MemoryManager>>,
+    numa_nodes: &NumaNodes,
+    tpm_enabled: bool,
+) -> String {
+    let FwCfgAcpiData {
+        rsdp,
+        table_bytes,
+        checksums,
+        pointer_offsets,
+    } = build_acpi_tables_for_fw_cfg(
+        &device_manager.lock().unwrap(),
+        &cpu_manager.lock().unwrap(),
+        &memory_manager.lock().unwrap(),
+        numa_nodes,
+        tpm_enabled,
+    );
+    let blobs = create_acpi_blobs(rsdp, table_bytes, checksums, pointer_offsets);
+    let mut hasher = Sha256::new();
+    hasher.update(&blobs.table_loader);
+    hasher.update(&blobs.rsdp);
+    hasher.update(&blobs.tables);
+
+    let digest = hasher.finalize();
+    let mut hex_digest = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write;
+        write!(&mut hex_digest, "{byte:02x}").unwrap();
+    }
+    hex_digest
 }
 
 pub fn create_acpi_tables(
