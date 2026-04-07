@@ -143,6 +143,9 @@ ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 #[cfg(target_arch = "x86_64")]
 const VIRTUAL_ADDRESS_SIZE: u64 = 1 << 48;
 
+#[cfg(feature = "sev_snp")]
+use kvm_bindings::{KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_X86_SNP_VM, kvm_memory_attributes};
+
 #[cfg(feature = "tdx")]
 const KVM_EXIT_TDX: u32 = 50;
 #[cfg(feature = "tdx")]
@@ -501,9 +504,11 @@ struct KvmDirtyLogSlot {
 
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
-    fd: VmFd,
+    fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
+    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    sev_fd: Option<x86_64::sev::SevFd>,
     dirty_log_slots: RwLock<HashMap<u32, KvmDirtyLogSlot>>,
     #[cfg(target_arch = "x86_64")]
     memfd: Option<OwnedFd>,
@@ -615,6 +620,15 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
+    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
+        self.sev_fd
+            .as_ref()
+            .unwrap()
+            .launch_start(&self.fd, guest_policy)
+            .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the address of the one-page region in the VM's address space.
@@ -914,6 +928,18 @@ impl vm::Vm for KvmVm {
         // SAFETY: Safe because caller promised this is safe.
         unsafe {
             self.set_user_memory_region(region)
+                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
+        }
+
+        #[cfg(feature = "sev_snp")]
+        if self.kvm_guest_memfd_supported {
+            self.fd
+                .set_memory_attributes(kvm_memory_attributes {
+                    address: region.guest_phys_addr,
+                    size: region.memory_size,
+                    attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+                    flags: 0,
+                })
                 .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
         }
         Ok(())
@@ -1354,15 +1380,17 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         }
 
         #[cfg(target_arch = "x86_64")]
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "tdx")] {
-                if _config.tdx_enabled {
-                    vm_type = KVM_X86_SW_PROTECTED_VM.into();
-                } else {
-                    vm_type = KVM_X86_DEFAULT_VM.into();
-                }
-            } else {
-                vm_type = KVM_X86_DEFAULT_VM.into();
+        {
+            vm_type = KVM_X86_DEFAULT_VM.into();
+
+            #[cfg(feature = "sev_snp")]
+            if _config.sev_snp_enabled {
+                vm_type = KVM_X86_SNP_VM.into();
+            }
+
+            #[cfg(feature = "tdx")]
+            if _config.tdx_enabled {
+                vm_type = KVM_X86_SW_PROTECTED_VM.into();
             }
         }
 
@@ -1418,10 +1446,35 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 };
             }
 
+            #[cfg(feature = "sev_snp")]
+            let sev_fd = {
+                let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
+                if sev_snp_enabled {
+                    let mask = self.kvm.check_extension_int(crate::kvm::Cap::ExitHypercall);
+                    let cap = kvm_bindings::kvm_enable_cap {
+                        cap: kvm_bindings::KVM_CAP_EXIT_HYPERCALL,
+                        args: [mask as _, 0, 0, 0],
+                        ..Default::default()
+                    };
+                    fd.enable_cap(&cap)
+                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+                    let sev_dev = x86_64::sev::SevFd::new("/dev/sev")
+                        .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
+                    sev_dev
+                        .init2(&fd)
+                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+                    Some(sev_dev)
+                } else {
+                    None
+                }
+            };
+
             Ok(Arc::new(KvmVm {
-                fd,
+                fd: Arc::new(fd),
                 msrs,
                 dirty_log_slots: RwLock::new(HashMap::new()),
+                #[cfg(feature = "sev_snp")]
+                sev_fd,
                 memfd,
                 kvm_guest_memfd_supported,
             }))
@@ -1430,7 +1483,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         {
             Ok(Arc::new(KvmVm {
-                fd,
+                fd: Arc::new(fd),
                 dirty_log_slots: RwLock::new(HashMap::new()),
                 kvm_guest_memfd_supported: false,
             }))
