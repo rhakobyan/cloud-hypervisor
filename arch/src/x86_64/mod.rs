@@ -819,6 +819,7 @@ pub fn configure_vcpu(
     cpu_vendor: CpuVendor,
     topology: (u16, u16, u16, u16),
     nested: bool,
+    setup_registers: bool,
 ) -> super::Result<()> {
     let x2apic_id = get_x2apic_id(id, Some(topology));
 
@@ -891,7 +892,9 @@ pub fn configure_vcpu(
     }
 
     regs::setup_msrs(vcpu).map_err(Error::MsrsConfiguration)?;
-    if let Some((kernel_entry_point, guest_memory)) = boot_setup {
+    if let Some((kernel_entry_point, guest_memory)) = boot_setup
+        && setup_registers
+    {
         regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
         regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
 
