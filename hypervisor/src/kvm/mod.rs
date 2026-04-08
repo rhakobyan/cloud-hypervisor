@@ -2340,6 +2340,32 @@ impl cpu::Vcpu for KvmVcpu {
                     }
                 }
 
+                #[cfg(feature = "sev_snp")]
+                VcpuExit::MemoryFault { flags, gpa, size } => {
+                    info!("VcpuExit::MemoryFault: flags={flags:#x}, gpa={gpa:#x}, size={size:#x}");
+
+                    const KVM_MEMORY_EXIT_FLAG_PRIVATE: u64 =
+                        kvm_bindings::KVM_MEMORY_EXIT_FLAG_PRIVATE as u64;
+
+                    const KVM_MEMORY_ATTRIBUTE_SHARED: u64 = 0;
+
+                    let attributes = if flags & KVM_MEMORY_EXIT_FLAG_PRIVATE != 0 {
+                        KVM_MEMORY_ATTRIBUTE_PRIVATE as u64
+                    } else {
+                        KVM_MEMORY_ATTRIBUTE_SHARED
+                    };
+
+                    self.vm_fd
+                        .set_memory_attributes(kvm_memory_attributes {
+                            address: gpa,
+                            size,
+                            attributes,
+                            flags: 0,
+                        })
+                        .map(|_| cpu::VmExit::Ignore)
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
+                }
+
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "Unexpected exit reason on vcpu run: {r:?}"
                 ))),
