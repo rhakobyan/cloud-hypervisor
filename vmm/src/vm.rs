@@ -109,6 +109,8 @@ use crate::{
     CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap,
     MEMORY_MANAGER_SNAPSHOT_ID, PciDeviceInfo, cpu,
 };
+#[cfg(feature = "igvm")]
+use igvm::IgvmFile;
 
 /// Errors associated with VM management
 #[derive(Debug, Error)]
@@ -326,10 +328,6 @@ pub enum Error {
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     #[error("Error coredumping VM")]
     Coredump(#[source] GuestDebuggableError),
-
-    #[cfg(feature = "igvm")]
-    #[error("Cannot open igvm file")]
-    IgvmFile(#[source] io::Error),
 
     #[cfg(feature = "igvm")]
     #[error("Cannot load the igvm into memory")]
@@ -560,6 +558,7 @@ impl Vm {
         console_resize_pipe: Option<Arc<File>>,
         original_termios: Arc<Mutex<Option<termios>>>,
         snapshot: Option<&Snapshot>,
+        #[cfg(feature = "igvm")] igvm_file: Option<IgvmFile>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new_from_memory_manager");
 
@@ -641,6 +640,8 @@ impl Vm {
             console_resize_pipe.as_ref(),
             &original_termios,
             snapshot,
+            #[cfg(feature = "igvm")]
+            igvm_file,
         )?;
 
         // Load kernel and initramfs files
@@ -868,6 +869,7 @@ impl Vm {
         console_resize_pipe: Option<&Arc<File>>,
         original_termios: &Arc<Mutex<Option<termios>>>,
         snapshot: Option<&Snapshot>,
+        #[cfg(feature = "igvm")] igvm_file: Option<IgvmFile>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         #[cfg(feature = "mshv")]
         let is_mshv = matches!(
@@ -902,6 +904,8 @@ impl Vm {
                 console_resize_pipe,
                 original_termios,
                 snapshot,
+                #[cfg(feature = "igvm")]
+                igvm_file,
             );
         }
 
@@ -931,6 +935,8 @@ impl Vm {
                 config,
                 #[cfg(feature = "igvm")]
                 cpu_manager,
+                #[cfg(feature = "igvm")]
+                igvm_file,
             )?
         } else {
             None
@@ -975,6 +981,7 @@ impl Vm {
         console_resize_pipe: Option<&Arc<File>>,
         original_termios: &Arc<Mutex<Option<termios>>>,
         snapshot: Option<&Snapshot>,
+        #[cfg(feature = "igvm")] igvm_file: Option<IgvmFile>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Create boot vCPUs before SEV-SNP initialization
         cpu_manager
@@ -994,6 +1001,8 @@ impl Vm {
                 config,
                 #[cfg(feature = "igvm")]
                 cpu_manager,
+                #[cfg(feature = "igvm")]
+                igvm_file,
             )?
         } else {
             None
@@ -1294,6 +1303,18 @@ impl Vm {
             vm_config.lock().unwrap().is_tdx_enabled()
         };
 
+        #[cfg(feature = "igvm")]
+        let igvm_file = {
+            let config = vm_config.lock().unwrap();
+            config
+                .payload
+                .as_ref()
+                .and_then(|p| p.igvm.as_ref())
+                .map(|igvm_path| crate::igvm::parse_igvm(igvm_path))
+                .transpose()
+                .map_err(Error::IgvmLoad)?
+        };
+
         let vm = Self::create_hypervisor_vm(
             hypervisor.as_ref(),
             vm_config.as_ref().lock().unwrap().deref().into(),
@@ -1353,6 +1374,8 @@ impl Vm {
             console_resize_pipe,
             original_termios,
             snapshot,
+            #[cfg(feature = "igvm")]
+            igvm_file,
         )
     }
 
@@ -1471,13 +1494,13 @@ impl Vm {
     #[cfg(feature = "igvm")]
     #[allow(clippy::needless_pass_by_value)]
     fn load_igvm(
-        igvm: File,
+        igvm_file: IgvmFile,
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
         let res = igvm_loader::load_igvm(
-            &igvm,
+            igvm_file,
             memory_manager,
             cpu_manager.clone(),
             "",
@@ -1567,14 +1590,16 @@ impl Vm {
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
         #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
+        #[cfg(feature = "igvm")] igvm_file: Option<IgvmFile>,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
         #[cfg(feature = "igvm")]
         {
-            if let Some(_igvm_file) = &payload.igvm {
-                let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
+            if payload.igvm.is_some() {
+                let igvm_file =
+                    igvm_file.ok_or(Error::IgvmLoad(igvm_loader::Error::MissingIgvm))?;
                 return Self::load_igvm(
-                    igvm,
+                    igvm_file,
                     memory_manager,
                     cpu_manager,
                     #[cfg(feature = "sev_snp")]
@@ -1623,6 +1648,7 @@ impl Vm {
         memory_manager: &Arc<Mutex<MemoryManager>>,
         config: &Arc<Mutex<VmConfig>>,
         #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
+        #[cfg(feature = "igvm")] igvm_file: Option<IgvmFile>,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Kernel with TDX is loaded in a different manner
         #[cfg(feature = "tdx")]
@@ -1649,6 +1675,8 @@ impl Vm {
                             memory_manager,
                             #[cfg(feature = "igvm")]
                             cpu_manager,
+                            #[cfg(feature = "igvm")]
+                            igvm_file,
                         )
                     })
                     .map_err(Error::KernelLoadThreadSpawn)
