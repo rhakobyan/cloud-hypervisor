@@ -226,6 +226,7 @@ pub fn load_igvm(
     #[cfg(feature = "sev_snp")] host_data: &Option<String>,
 ) -> Result<Box<IgvmLoadedInfo>, Error> {
     let hypervisor_type = cpu_manager.lock().unwrap().hypervisor_type();
+    // HypervisorType variants are all #[cfg]-gated, so this match is exhaustive at compile time.
     let page_types = match hypervisor_type {
         #[cfg(feature = "mshv")]
         HypervisorType::Mshv => PageTypeConfig {

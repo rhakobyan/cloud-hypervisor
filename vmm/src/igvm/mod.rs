@@ -33,6 +33,7 @@ use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 use std::path::Path;
 use zerocopy::FromZeros;
 
+// TODO: IsolationType is hardcoded to Snp. Parameterize when TDX IGVM support lands.
 pub fn parse_igvm(igvm_path: &Path) -> Result<IgvmFile, igvm_loader::Error> {
     let file_contents = std::fs::read(igvm_path).map_err(igvm_loader::Error::Igvm)?;
     IgvmFile::new_from_binary(&file_contents, Some(IsolationType::Snp))
