@@ -12,8 +12,14 @@ mkdir -p "$WORKLOADS_DIR/junit"
 
 process_common_args "$@"
 
-test_features="--features mshv,igvm,sev_snp"
-build_features="mshv,igvm,sev_snp"
+if [ "$hypervisor" = "mshv" ]; then
+    build_features="mshv,igvm,sev_snp"
+    nextest_profile="cvm_mshv"
+else # kvm
+    build_features="kvm,igvm,sev_snp,fw_cfg"
+    nextest_profile="cvm_kvm"
+fi
+test_features="--features $build_features"
 
 JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
 JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
@@ -33,7 +39,7 @@ fi
 cargo build --features $build_features --all --release --target "$BUILD_TARGET"
 
 export RUST_BACKTRACE=1
-time cargo nextest run -p cloud-hypervisor $test_features --profile common_cvm --no-tests=pass --test-threads=$(($(nproc) / 4)) "$test_filter" -- ${test_binary_args[*]}
+time cargo nextest run -p cloud-hypervisor $test_features --profile "$nextest_profile" --no-tests=pass --test-threads=$(($(nproc) / 4)) "$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 exit $RES

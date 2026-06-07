@@ -10,6 +10,15 @@
 #![allow(dead_code)]
 mod common;
 
+// Build a confidential (SEV-SNP) guest from a disk image.
+#[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+macro_rules! basic_cvm_guest {
+    ($image_name:expr) => {{
+        let disk_config = UbuntuDiskConfig::new($image_name.to_string());
+        GuestFactory::new_confidential_guest_factory().create_guest(Box::new(disk_config))
+    }};
+}
+
 #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
 mod common_cvm {
     use block::ImageType;
@@ -19,12 +28,6 @@ mod common_cvm {
     const NUM_PCI_SEGMENTS: u16 = 8;
 
     use super::*;
-    macro_rules! basic_cvm_guest {
-        ($image_name:expr) => {{
-            let disk_config = UbuntuDiskConfig::new($image_name.to_string());
-            GuestFactory::new_confidential_guest_factory().create_guest(Box::new(disk_config))
-        }};
-    }
 
     #[test]
     fn test_jammy_simple_launch() {
@@ -95,15 +98,6 @@ mod common_cvm {
     fn test_virtio_net_ctrl_queue() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_virtio_net_ctrl_queue(&guest);
-    }
-
-    #[test]
-    fn test_pci_multiple_segments() {
-        // Use 8 segments to test the multiple segment support since it's more than the default 6
-        //  supported by Linux
-        // IGVM file used by Sev-Snp Guest now support up to 8 segments, so we can use 8 segments for testing.
-        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
-        _test_pci_multiple_segments(&guest, NUM_PCI_SEGMENTS, 5);
     }
 
     #[test]
@@ -208,24 +202,6 @@ mod common_cvm {
     }
 
     #[test]
-    fn test_dmi_uuid() {
-        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
-        _test_dmi_uuid(&guest);
-    }
-
-    #[test]
-    fn test_dmi_oem_strings() {
-        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
-        _test_dmi_oem_strings(&guest);
-    }
-
-    #[test]
-    fn test_dmi_system_and_chassis() {
-        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
-        _test_dmi_system_and_chassis(&guest);
-    }
-
-    #[test]
     fn test_multiple_network_interfaces() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_multiple_network_interfaces(&guest);
@@ -321,6 +297,41 @@ mod common_cvm {
     fn test_macvtap_hotplug() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
         _test_macvtap(&guest, true, "guestmacvtap1", "hostmacvtap1");
+    }
+}
+
+// Run on MSHV only. mshv_only. See scripts/run_integration_tests_cvm.sh and
+// .config/nextest.toml on how this is selected for MSHV.
+#[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+mod mshv_only {
+    use common::tests_wrappers::*;
+    use test_infra::*;
+
+    use super::*;
+    const NUM_PCI_SEGMENTS: u16 = 8;
+
+    #[test]
+    fn test_pci_multiple_segments() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_pci_multiple_segments(&guest, NUM_PCI_SEGMENTS, 5);
+    }
+
+    #[test]
+    fn test_dmi_uuid() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_dmi_uuid(&guest);
+    }
+
+    #[test]
+    fn test_dmi_oem_strings() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_dmi_oem_strings(&guest);
+    }
+
+    #[test]
+    fn test_dmi_system_and_chassis() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_dmi_system_and_chassis(&guest);
     }
 
     #[test]

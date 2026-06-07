@@ -36,3 +36,11 @@ junit.path = "/root/workloads/junit/ivshmem.xml"
 inherits = "integration"
 default-filter = 'test(common_cvm::)'
 junit.path = "/root/workloads/junit/cvm.xml"
+
+[profile.cvm_mshv]
+inherits = "common_cvm"
+default-filter = 'test(common_cvm::) | test(mshv_only::)'
+
+[profile.cvm_kvm]
+inherits = "common_cvm"
+default-filter = 'test(common_cvm::)'
