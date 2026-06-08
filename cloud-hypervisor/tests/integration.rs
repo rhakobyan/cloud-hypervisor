@@ -2910,7 +2910,10 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_iommu() {
-        _test_virtio_iommu(cfg!(target_arch = "x86_64"));
+        let guest = Guest::new(Box::new(UbuntuDiskConfig::new(
+            JAMMY_IMAGE_NAME.to_string(),
+        )));
+        _test_virtio_iommu(&guest, cfg!(target_arch = "x86_64"));
     }
 
     #[test]
@@ -11675,7 +11678,10 @@ mod aarch64_acpi {
     #[test]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #8187")]
     fn test_virtio_iommu() {
-        _test_virtio_iommu(true);
+        let guest = Guest::new(Box::new(UbuntuDiskConfig::new(
+            JAMMY_IMAGE_NAME.to_string(),
+        )));
+        _test_virtio_iommu(&guest, true);
     }
 }
 

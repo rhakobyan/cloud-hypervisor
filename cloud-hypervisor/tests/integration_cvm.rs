@@ -101,6 +101,12 @@ mod common_cvm {
     }
 
     #[test]
+    fn test_virtio_iommu() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_virtio_iommu(&guest, false);
+    }
+
+    #[test]
     fn test_direct_kernel_boot() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_direct_kernel_boot(&guest);

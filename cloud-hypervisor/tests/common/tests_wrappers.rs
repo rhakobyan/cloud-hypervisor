@@ -1360,24 +1360,29 @@ pub(crate) fn test_memory_mergeable(mergeable: bool) {
 // The last interesting part of this test is that it exercises the network
 // interface attached to the virtual IOMMU since this is the one used to
 // send all commands through SSH.
-pub(crate) fn _test_virtio_iommu(_acpi: bool /* not needed on x86_64 */) {
-    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-    let guest = Guest::new(Box::new(disk_config));
+pub(crate) fn _test_virtio_iommu(guest: &Guest, _acpi: bool /* not needed on x86_64 */) {
+    let mut cmd = GuestCommand::new(guest);
+    cmd.default_cpus().default_memory();
 
-    #[cfg(target_arch = "x86_64")]
-    let kernel_path = direct_kernel_boot_path();
-    #[cfg(target_arch = "aarch64")]
-    let kernel_path = if _acpi {
-        edk2_path()
+    // Confidential guests boot via IGVM (and, on the KVM path, a separately
+    // supplied direct kernel); default_kernel_cmdline() selects that from the
+    // guest's vm_type. Regular guests boot an explicit direct/EDK2 kernel.
+    if guest.vm_type == GuestVmType::Confidential {
+        cmd.default_kernel_cmdline();
     } else {
-        direct_kernel_boot_path()
-    };
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = if _acpi {
+            edk2_path()
+        } else {
+            direct_kernel_boot_path()
+        };
+        cmd.args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+    }
 
-    let mut child = GuestCommand::new(&guest)
-        .default_cpus()
-        .default_memory()
-        .args(["--kernel", kernel_path.to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+    let mut child = cmd
         .args([
             "--disk",
             format!(
