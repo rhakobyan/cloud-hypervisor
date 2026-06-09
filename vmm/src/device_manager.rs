@@ -4348,9 +4348,22 @@ impl DeviceManager {
         // If SEV-SNP is enabled create the AccessPlatform from SevSnpPageAccessProxy
         #[cfg(feature = "sev_snp")]
         if self.config.lock().unwrap().is_sev_snp_enabled() {
-            access_platform = Some(Arc::new(SevSnpPageAccessProxy::new(
-                self.address_manager.vm.clone(),
-            )));
+            #[cfg(feature = "kvm")]
+            let is_kvm = matches!(
+                self.cpu_manager.lock().unwrap().hypervisor_type(),
+                hypervisor::HypervisorType::Kvm
+            );
+            #[cfg(not(feature = "kvm"))]
+            let is_kvm = false;
+
+            // Installing the SevSnpPageAccessProxy over a vIOMMU access
+            // platform would discard the IOVA->GPA translation. Skip it
+            // on KVM where the proxy is a no-op.
+            if !(is_kvm && access_platform.is_some()) {
+                access_platform = Some(Arc::new(SevSnpPageAccessProxy::new(
+                    self.address_manager.vm.clone(),
+                )));
+            }
         }
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
