@@ -574,6 +574,11 @@ impl Request {
                         return Err(Error::InvalidMapRequest);
                     }
 
+                    let (diag_virt, diag_phys) = (req.virt_start, req.phys_start);
+                    warn!(
+                        "DIAG iommu MAP: domain={domain_id} iova={diag_virt:#x} -> gpa={diag_phys:#x} size={size:#x}"
+                    );
+
                     // Going forward MAP rejects overlap, so within a domain
                     // mappings are disjoint and the rightmost mapping with
                     // start <= virt_end is the only candidate to overlap.
@@ -1081,7 +1086,12 @@ impl AccessPlatformMapping {
 
 impl AccessPlatform for AccessPlatformMapping {
     fn translate_gva(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error> {
-        self.mapping.translate_gva(self.id, base, size)
+        let r = self.mapping.translate_gva(self.id, base, size);
+        warn!(
+            "DIAG translate_gva: id={} iova={base:#x} size={size:#x} -> {r:x?}",
+            self.id
+        );
+        r
     }
     fn translate_gpa(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error> {
         self.mapping.translate_gpa(self.id, base, size)

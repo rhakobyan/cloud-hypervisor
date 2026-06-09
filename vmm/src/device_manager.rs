@@ -4360,9 +4360,20 @@ impl DeviceManager {
             // platform would discard the IOVA->GPA translation. Skip it
             // on KVM where the proxy is a no-op.
             if !(is_kvm && access_platform.is_some()) {
+                warn!(
+                    "DIAG sev_snp: installing SevSnpPageAccessProxy for {} (is_kvm={}, had_iommu_access_platform={})",
+                    virtio_device_id,
+                    is_kvm,
+                    access_platform.is_some()
+                );
                 access_platform = Some(Arc::new(SevSnpPageAccessProxy::new(
                     self.address_manager.vm.clone(),
                 )));
+            } else {
+                warn!(
+                    "DIAG sev_snp: keeping vIOMMU AccessPlatform for {} (is_kvm={})",
+                    virtio_device_id, is_kvm
+                );
             }
         }
 

@@ -2464,12 +2464,21 @@ impl cpu::Vcpu for KvmVcpu {
                                 .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                             if set_private_attr == 0 {
+                                warn!(
+                                    "DIAG share(MAP_GPA): gpa={address:#x} size={size:#x} pages={num_pages}"
+                                );
                                 Self::punch_holes_in_guest_memfd(&self.memory_slots, address, size);
                             }
 
                             Ok(cpu::VmExit::Ignore)
                         }
-                        _ => Ok(cpu::VmExit::Ignore),
+                        nr => {
+                            warn!(
+                                "DIAG ignored-hypercall: nr={nr} args=[{:#x}, {:#x}, {:#x}]",
+                                hypercall.args[0], hypercall.args[1], hypercall.args[2]
+                            );
+                            Ok(cpu::VmExit::Ignore)
+                        }
                     }
                 }
 
@@ -2493,6 +2502,10 @@ impl cpu::Vcpu for KvmVcpu {
                         // https://docs.kernel.org/virt/kvm/api.html#kvm-set-memory-attributes
                         0u64
                     };
+
+                    if attributes == 0 {
+                        warn!("DIAG share(fault): gpa={gpa:#x} size={size:#x}");
+                    }
 
                     self.vm_fd
                         .set_memory_attributes(kvm_memory_attributes {
